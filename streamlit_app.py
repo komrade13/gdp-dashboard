@@ -1,151 +1,139 @@
-import streamlit as st
+# Import required libraries
+import PIL
 import pandas as pd
-import math
-from pathlib import Path
+import streamlit as st
+from ultralytics import YOLO
 
-# Set the title and favicon that appear in the Browser's tab bar.
+# Replace the relative path to your weight file
+model_path = 'weights/best.pt'
+
+# Setting page layout
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title="Retail Object Detection",  # Setting page title
+    page_icon="🛒",     # Setting page icon
+    layout="wide",      # Setting layout to wide
+    initial_sidebar_state="expanded",    # Expanding sidebar by default
 )
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Load the YOLO model
+try:
+    model = YOLO(model_path)
+except Exception as ex:
+    st.error(f"Unable to load model. Check the specified path: {model_path}")
+    st.error(ex)
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# Creating sidebar
+with st.sidebar:
+    st.header("Image Upload")     # Adding header to sidebar
+    # Adding file uploader to sidebar for selecting images
+    source_img = st.file_uploader("Upload an image here", type=("jpg", "jpeg", "png", 'bmp', 'webp'))
+    # Model Options
+    confidence = float(st.slider("Set Model Confidence", 0, 100, 50)) / 100
+    # Overlap Threshold Slider
+    overlap_threshold = float(st.slider("Set Overlap Threshold", 0, 100, 50)) / 100
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# Creating main page heading
+st.title("Retail Object Detection")
+st.caption('Upload a photo containing one or multiple retail products, then click the :blue[Detect Objects] button and check the result.')
+# Creating two columns on the main page
+col1, col2 = st.columns(2)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# Define object classes and prices
+products_prices = {
+    0: ('Bihun Asam Pedas', 3000),
+    1: ('Bihun Laksa', 3000),
+    2: ('Charm Non Wing', 4500),
+    3: ('Chitato 75g', 3000),
+    4: ('Cotton Buds Mode Puf', 5000),
+    5: ('Daia Softener Romantic Pink 245g', 5000),
+    6: ('Saus Del Monte Extra Hot', 4500),
+    7: ('Daimaru Double Foam Tape', 8000),
+    8: ('Minyak Goreng Sawit Fitri', 8000),
+    9: ('Susu Kental Manis Frisian Flag', 2500),
+    10: ('Lem Joyko', 3000),
+    11: ('Gula 500gr', 10000),
+    12: ('Minyak Kayu Putih 30ml', 6000),
+    13: ('Mama Lemon 105ml', 2000),
+    14: ('Amplop Merpati', 20000),
+    15: ('Mie Sedaap', 3000),
+    16: ('Nabati Korean', 2000),
+    17: ('Nabati Lava', 2000),
+    18: ('Sabun Cair Nuvo Family', 5000),
+    19: ('Pepsodent Herbal', 5000),
+    20: ('Polytex Sponge', 3000),
+    21: ('Pop Ice Rasa Anggur', 1500),
+    22: ('Pop Mie Rasa Ayam Bawang', 3500),
+    23: ('Royco 8gr', 500),
+    24: ('Crackers Saltcheese Khong Guan', 4000),
+    25: ('Sambal Terasi Uleg', 3000),
+    26: ('Gunting Gunindo OSS', 6500),
+    27: ('Indofood Kecap Manis 77g', 2000),
+    28: ('Rosina Gula Pasir 200g', 5000),
+    29: ('Santan Sun Kara 65ml', 3500),
+    30: ('Super Pell 280ml', 5000),
+    31: ('Selotip Nachi Tape', 9500),
+    32: ('Teh Tjap Angon', 3500),
+    33: ('Tepung 500gr', 7000),
+    34: ('Tissue Baik', 10000)
+}
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# Create an empty DataFrame to hold the checkout list
+checkout_df = pd.DataFrame(columns=['Product', 'Price per Item', 'Quantity', 'Subtotal'])
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+# Adding image to the first column if image is uploaded
+with col1:
+    if source_img:
+        uploaded_image = PIL.Image.open(source_img)
+        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+# Detect objects and calculate quantities and prices
+if st.sidebar.button('Detect Objects', key="detect_objects_button"):
+    res = model.predict(uploaded_image, conf=confidence, iou=overlap_threshold)
+    # Ensure an image is uploaded before proceeding
+    if source_img:
+        uploaded_image = PIL.Image.open(source_img)
+        
+        # Perform detection
+        res = model.predict(uploaded_image, conf=confidence)
+        boxes = res[0].boxes
+        detected_items = {}
 
-    return gdp_df
+        # Initialize detected items dictionary
+        detected_items = {}
 
-gdp_df = get_gdp_data()
+        # Count each detected item by its class ID
+        for box in boxes:
+            class_id = int(box.cls)  # Convert class to integer for dictionary lookup
+            if class_id in detected_items:
+                detected_items[class_id] += 1
+            else:
+                detected_items[class_id] = 1
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+        # Fill the DataFrame with products, prices, quantities, and total prices
+        for class_id, quantity in detected_items.items():
+            product_name, price_per_item = products_prices.get(class_id, ('Unknown', 0.0))
+            subtotal = price_per_item * quantity
+            new_row = pd.DataFrame({
+                'Product': [product_name],
+                'Price per Item': [price_per_item],
+                'Quantity': [quantity],
+                'Subtotal': [subtotal]
+            })
+            checkout_df = pd.concat([checkout_df, new_row], ignore_index=True)
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
+        # Calculate the final price
+        final_total = checkout_df['Subtotal'].sum()
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
+        # Display the checkout table in col1
+        with col1:
+            st.write("### Checkout List")
+            st.table(checkout_df)
+            st.divider()
+            st.header(f"**Grand Total: :blue[Rp. {final_total:,.2f}]**")
 
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+        # Display the detected image in col2
+        with col2:
+            res_plotted = res[0].plot()[:, :, ::-1]
+            st.image(res_plotted, caption='Detected Image', use_column_width=True)
+    else:
+        st.sidebar.warning("Please upload an image first!")
