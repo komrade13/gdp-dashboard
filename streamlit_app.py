@@ -84,7 +84,7 @@ checkout_df = pd.DataFrame(columns=['Product', 'Price per Item', 'Quantity', 'Su
 with col1:
     if source_img:
         uploaded_image = PIL.Image.open(source_img)
-        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+        st.image(uploaded_image, caption="Uploaded Image", use_container_width=True)
 
 # Detect objects and calculate quantities and prices
 if st.sidebar.button('Detect Objects', key="detect_objects_button"):
@@ -134,6 +134,6 @@ if st.sidebar.button('Detect Objects', key="detect_objects_button"):
         # Display the detected image in col2
         with col2:
             res_plotted = res[0].plot()[:, :, ::-1]
-            st.image(res_plotted, caption='Detected Image', use_column_width=True)
+            st.image(res_plotted, caption='Detected Image', use_container_width=True)
     else:
         st.sidebar.warning("Please upload an image first!")
